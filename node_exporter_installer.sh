@@ -297,8 +297,6 @@ run_all_daemon_systemctl_command() {
 
 install_new() {
 
-    port_input_from_user_prompt
-
     echo "Downloading files..."
     download_and_extract_necessary_files_and_folders
     echo "End of downloading files and extract..."
@@ -392,6 +390,8 @@ if [[ "$selected_version_index" =~ ^[0-9]+$ && "$selected_version_index" -ge 1 &
         fi
     fi
     # end of Check if Node Exporter is already installed
+
+    port_input_from_user_prompt
 
     echo "Installation starting ......"
     install_new
