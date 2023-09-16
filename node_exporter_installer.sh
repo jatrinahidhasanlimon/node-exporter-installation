@@ -99,7 +99,7 @@ move_extracted_files_and_folders() {
 
 create_system_user_and_give_permissions() {
     useradd -rs /bin/false node_exporter
-    chown -R node_exporter:node_exporter ${node_exporter_default_etc_directory}
+    sudo chown -R node_exporter:node_exporter ${node_exporter_default_etc_directory}
 }
 
 remove_downloaded_files_and_folders() {
@@ -275,7 +275,7 @@ is_crt_key_exist_in_node_exporter_folder() {
 }
 
 run_all_daemon_systemctl_command() {
-
+ 
     systemctl daemon-reload
     systemctl enable node_exporter
     systemctl start node_exporter
@@ -331,9 +331,16 @@ install_new() {
         fi
 
         # relaoad daemon and enable systemctl
-        echo "all daemon process reloading ............"
-        chown -R node_exporter:node_exporter ${node_exporter_default_etc_directory}
-        run_all_daemon_systemctl_command
+        echo "creating a systemd user and giving persmission ............"
+        
+            create_system_user_and_give_permissions
+        
+        echo "*** End of creating a systemd user and giving persmission ***"
+
+        echo "*** All daemon process reloading ***"
+        
+            run_all_daemon_systemctl_command
+        
         echo "***all daemon process reloaded***"
     fi
 }
