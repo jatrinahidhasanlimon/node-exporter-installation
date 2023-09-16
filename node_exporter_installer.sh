@@ -1,7 +1,12 @@
 #!/bin/bash
-
+# set -e
 # Fetch the system's architecture and save it to a variable
-system_architecture=$(dpkg --print-architecture)
+# List of available version numbers
+readonly available_versions=("1.3.1" "1.6.1")
+readonly system_architecture=$(dpkg --print-architecture)
+readonly node_exporter_default_etc_directory="/etc/node_exporter"
+readonly config_file_path="${node_exporter_default_etc_directory}/config.yml"
+readonly bin_file_path="/usr/local/bin/node_exporter*"
 
 # check is port is occpied
 is_port_occupied() {
@@ -47,13 +52,13 @@ is_already_installed() {
 
 remove_allready_existing_files_and_folder() {
     # Remove the node_exporter configuration directory
-    sudo rm -r /etc/node_exporter
+    rm -r ${node_exporter_default_etc_directory}
     # Remove all files and directories named node_exporter
-    sudo rm -r node_exporter-$selected_version*
+    rm -r node_exporter-$selected_version*
     # Stop the node_exporter service
-    sudo systemctl stop node_exporter
+    systemctl stop node_exporter
     # Remove the node_exporter systemd unit file
-    sudo rm -r /etc/systemd/system/node_exporter.service
+    rm -r /etc/systemd/system/node_exporter.service
 }
 
 download_and_extract_necessary_files_and_folders() {
@@ -68,26 +73,48 @@ download_and_extract_necessary_files_and_folders() {
 }
 
 move_extracted_files_and_folders() {
+
+    # Check if the directory exists
+    if [ -d "$node_exporter_default_etc_directory" ]; then
+        echo "Directory exists. Removing..."
+        rm -r "$node_exporter_default_etc_directory"
+    fi
+
+    # Create the directory
+    mkdir -p "$node_exporter_default_etc_directory"
+
+    echo "Directory created at $node_exporter_default_etc_directory"
+
     #created folder is a combination of  selected version of node_exporter and system_architecture
-    created_folder=node_exporter-$selected_version.linux-$system_architecture
-    sudo mkdir /etc/node_exporter
-    sudo touch /etc/node_exporter/config.yml
-    sudo mv $created_folder/node_exporter* /usr/local/bin
-    mv $created_folder/* /etc/node_exporter
+    downloaded_directory=node_exporter-$selected_version.linux-$system_architecture
+
+    if [ -e "$bin_file_path" ]; then
+        rm "$bin_file_path"
+        echo "File '$bin_file_path' has been removed."
+    fi
+
+    mv $downloaded_directory/node_exporter* /usr/local/bin
+    mv $downloaded_directory/* ${node_exporter_default_etc_directory}
 }
 
 create_system_user_and_give_permissions() {
-    sudo useradd -rs /bin/false node_exporter
-    chown -R node_exporter:node_exporter /etc/node_exporter
+    useradd -rs /bin/false node_exporter
+    chown -R node_exporter:node_exporter ${node_exporter_default_etc_directory}
 }
 
 remove_downloaded_files_and_folders() {
     #created folder is a combination of  selected version of node_exporter and system_architecture
-    sudo rm -r $created_folder*
+    rm -r $downloaded_directory*
 }
 
 create_systemd_service_file() {
     service_file_path="/etc/systemd/system/node_exporter.service"
+
+    if [ -e "$service_file_path" ]; then
+        rm "$service_file_path"
+        echo "File'$service_file_path' has been removed."
+    fi
+
     # Text to be written to the file
     content_of_service_file="[Unit]
     Description=Node Exporter
@@ -97,8 +124,7 @@ create_systemd_service_file() {
     User=node_exporter
     Group=node_exporter
     Type=simple
-    ExecStart=/usr/local/bin/node_exporter --web.config.file=/etc/node_exporter/config.yml 
-              --web.listen-address=:$port
+    ExecStart=/usr/local/bin/node_exporter --web.config.file=${node_exporter_default_etc_directory}/config.yml --web.listen-address=:$port
     [Install]
     WantedBy=multi-user.target"
 
@@ -113,20 +139,49 @@ create_systemd_service_file() {
     fi
 
 }
-update_config_yml() {
-    # Prompt the user for a username
-        read -p "Enter your username: " username
-        # Prompt the user for a password (and hide input)
-        read -s -p "Enter your password: " password
-        echo  # Add a newline after password input
-        # Display the entered username and a message
-        echo "You entered the following information:"
-        echo "Username: $username"
-        echo "Password: (hidden)"
+ask_for_usernam_passwor_promt() {
 
+    #!/bin/bash
 
+    while true; do
+        read -p "Enter a username: " username
 
-    config_file_path="/etc/node_exporter/config.yml"
+        # Check if the username is not null
+        if [ -n "$username" ]; then
+            break
+        else
+            echo "Username cannot be empty. Please try again."
+        fi
+    done
+
+    while true; do
+        read -s -p "Enter a password (hashed, e.g., starting with '$1$'): " password
+        echo # Print a newline after password input for better formatting
+
+        # Check if the password is not null
+        if [ -n "$password" ]; then
+            if [[ "$password" == "$1$"* ]]; then
+                break
+            else
+                echo "Password should start with '$1$'. Please try again."
+            fi
+        else
+            echo "Password cannot be empty. Please try again."
+        fi
+    done
+
+    echo "Username is: $username"
+    echo "Password is: $password"
+
+}
+
+write_config_yml() {
+
+    if [ -e "$config_file_path" ]; then
+        rm "$config_file_path"
+        echo "File'$config_file_path' has been removed."
+    fi
+
     # Text to be written to the file
     config_content="tls_server_config:
   cert_file: node_exporter.crt
@@ -198,12 +253,12 @@ cert_certificate_options_prompt() {
 }
 
 generate_cert_and_key() {
-    sudo mkdir temp_openssl
-    sudo openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -keyout temp_openssl/node_exporter.key -out temp_openssl/node_exporter.crt
+    mkdir temp_openssl
+    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -keyout temp_openssl/node_exporter.key -out temp_openssl/node_exporter.crt
 }
 
 is_crt_key_exist_in_node_exporter_folder() {
-    directory="/etc/node_exporter" # Replace with the actual directory path
+    directory="${node_exporter_default_etc_directory}" # Replace with the actual directory path
     cert_file="$directory/node_exporter.crt"
     key_file="$directory/node_exporter.key"
 
@@ -215,20 +270,23 @@ is_crt_key_exist_in_node_exporter_folder() {
         echo "File $cert_file does not exist in the directory $directory."
     else
         echo "Exiting ..... Neither file $cert_file nor $key_file exists in the directory $directory."
+        exit
     fi
 }
 
 run_all_daemon_systemctl_command() {
 
-    sudo systemctl daemon-reload
-    sudo systemctl enable node_exporter
-    sudo systemctl start node_exporter
-    sudo systemctl status node_exporter
+    systemctl daemon-reload
+    systemctl enable node_exporter
+    systemctl start node_exporter
+    systemctl status node_exporter
 }
 
 install_new() {
+
+    ##test
+
     port_input_from_user_prompt
-    
 
     echo "Downloading files..."
     download_and_extract_necessary_files_and_folders
@@ -258,12 +316,13 @@ install_new() {
                 # Nested check: if the variable value is equal to "Use an existing certificate"
                 if [ "$selected_cert_option" == "Create a new certificate" ]; then
                     # Perform actions when selected_cert_option is set and is "Use an existing certificate"
-                    sudo mv temp_openssl/* /etc/node_exporter/
-                    sudo rm -r temp_openssl
-                    echo "Moving cert files from temp folder to /etc/node_exporter"
+                    mv temp_openssl/* ${node_exporter_default_etc_directory}/
+                    rm -r temp_openssl
+                    echo "Moving cert files from temp folder to ${node_exporter_default_etc_directory}"
                 fi
                 is_crt_key_exist_in_node_exporter_folder
-                update_config_yml
+                ask_for_usernam_passwor_promt
+                write_config_yml
 
             else
                 # Handle the case when selected_cert_option is not set (null or empty)
@@ -273,16 +332,13 @@ install_new() {
 
         # relaoad daemon and enable systemctl
         echo "all daemon process reloading ............"
-        chown -R node_exporter:node_exporter /etc/node_exporter
+        chown -R node_exporter:node_exporter ${node_exporter_default_etc_directory}
         run_all_daemon_systemctl_command
         echo "***all daemon process reloaded***"
     fi
 }
 
 # starting main block
-
-# List of available version numbers
-available_versions=("1.3.1" "1.6.1")
 
 # Prompt the user to select a version
 echo "Select a version:"
@@ -297,7 +353,7 @@ read -p "Enter the number of the version you want to use: " selected_version_ind
 if [[ "$selected_version_index" =~ ^[0-9]+$ && "$selected_version_index" -ge 1 && "$selected_version_index" -le "${#available_versions[@]}" ]]; then
     selected_version="${available_versions[selected_version_index - 1]}"
     # Take Input Port from user
-    
+
     echo "***is node exporter already installed checking......**"
 
     # Start Check if Node Exporter is already installed
@@ -319,7 +375,6 @@ if [[ "$selected_version_index" =~ ^[0-9]+$ && "$selected_version_index" -ge 1 &
     fi
     # end of Check if Node Exporter is already installed
 
-   
     echo " Installing started"
     install_new
 
