@@ -8,8 +8,8 @@ readonly node_exporter_default_etc_directory="/etc/node_exporter"
 readonly config_file_path="${node_exporter_default_etc_directory}/config.yml"
 readonly bin_directory="/usr/local/bin"
 readonly bin_file_path="${bin_directory}/node_exporter*"
+readonly temp_tls_certificates_directory="temp_tsl_certificates"
 config_content=""
-
 # Function to check if a port is in use
 is_port_in_use() {
     local port="$1"
@@ -117,8 +117,10 @@ create_system_user_and_give_permissions() {
 }
 
 remove_downloaded_files_and_folders() {
-    #created folder is a combination of  selected version of node_exporter and system_architecture
-    rm -r $downloaded_directory*
+    #created folder is a combinationof selected version of node_exporter and system_architecture
+    if [ -d "$downloaded_directory" ]; then
+        rm -r $downloaded_directory*
+    fi
 }
 
 create_systemd_service_file() {
@@ -138,7 +140,7 @@ create_systemd_service_file() {
     User=node_exporter
     Group=node_exporter
     Type=simple
-    ExecStart=/usr/local/bin/node_exporter --web.config.file=${node_exporter_default_etc_directory}/config.yml --web.listen-address=:$port
+    ExecStart=/usr/local/bin/node_exporter --web.config.file=${config_file_path} --web.listen-address=:$port
     [Install]
     WantedBy=multi-user.target"
 
@@ -196,8 +198,6 @@ write_config_yml() {
         echo "File'$config_file_path' has been removed."
     fi
 
-    # Text to be written to the file
-    
     # Use redirection to create and write to the file
     echo "$config_content" >"$config_file_path"
 
@@ -212,7 +212,7 @@ write_config_yml() {
 
 user_installation_option_prompt() {
     PS3="Select an option: "
-    installation_options=("Basic Installation" "Secured Installation" "Quit")
+    installation_options=("Basic Installation" "Secured Installation")
 
     select selected_user_installation_option in "${installation_options[@]}"; do
         case $selected_user_installation_option in
@@ -222,49 +222,13 @@ user_installation_option_prompt() {
             ;;
         "Secured Installation")
             echo "Thank you for choosing Secured Installation."
-            cert_certificate_options_prompt
             break
-            ;;
-        "Quit")
-            echo "Exiting..."
-            exit 0
             ;;
         *)
             echo "Invalid choice. Please select a valid option."
             ;;
         esac
     done
-}
-
-cert_certificate_options_prompt() {
-    PS4="Do you want to: "
-    cert_installation_options=("Create a new certificate" "Use an existing certificate" "Quit")
-
-    select selected_cert_option in "${cert_installation_options[@]}"; do
-        case $selected_cert_option in
-        "Create a new certificate")
-            echo -e "\nYou chose to create a new certificate"
-            generate_cert_and_key
-            break
-            ;;
-        "Use an existing certificate")
-            echo -e "\nYou chose to use an existing certificate"
-            break
-            ;;
-        "Quit")
-            echo "Exiting..."
-            exit
-            ;;
-        *)
-            echo "Invalid choice. Please select a valid option."
-            ;;
-        esac
-    done
-}
-
-generate_cert_and_key() {
-    mkdir temp_openssl
-    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -keyout temp_openssl/node_exporter.key -out temp_openssl/node_exporter.crt
 }
 
 is_crt_key_exist_in_node_exporter_folder() {
@@ -279,7 +243,7 @@ is_crt_key_exist_in_node_exporter_folder() {
     elif [ -e "$key_file" ]; then
         echo "File $cert_file does not exist in the directory $directory."
     else
-        echo "Exiting ..... Neither file $cert_file nor $key_file exists in the directory $directory."
+        echo "Exiting ..... Becusese Neither file $cert_file nor $key_file exists in the directory $directory."
         exit
     fi
 }
@@ -290,6 +254,19 @@ run_all_daemon_systemctl_command() {
     systemctl enable node_exporter
     systemctl start node_exporter
     systemctl status node_exporter
+}
+copy_cert_files_from_temp_to_node_exporter() {
+
+    if [ -e "${temp_tls_certificates_directory}/node_exporter.crt" ] && [ -e "${temp_tls_certificates_directory}/node_exporter.key" ]; then
+        if [ -d "$node_exporter_default_etc_directory" ]; then
+            cp -f ${temp_tls_certificates_directory}/node_exporter.crt ${node_exporter_default_etc_directory}
+            cp -f ${temp_tls_certificates_directory}/node_exporter.key ${node_exporter_default_etc_directory}
+        fi
+    else
+        echo "exiting ... crt,key file not exist"
+        exit
+    fi
+
 }
 
 install_new() {
@@ -309,38 +286,45 @@ install_new() {
     user_installation_option_prompt
 
     if [ -n "$selected_user_installation_option" ]; then
-        create_systemd_service_file
 
         if [ "$selected_user_installation_option" == "Basic Installation" ]; then
             echo "*** continue as Basic installation  *** "
         fi
 
         if [ "$selected_user_installation_option" == "Secured Installation" ]; then
+            echo "*** continue as Secured installation  *** "
+            # Text to be written to the file
 
-            # Check if selected_cert_option is set (not null or empty)
-            if [ -n "$selected_cert_option" ]; then
-                # Nested check: if the variable value is equal to "Use an existing certificate"
-                if [ "$selected_cert_option" == "Create a new certificate" ]; then
-                    # Perform actions when selected_cert_option is set and is "Use an existing certificate"
-                    mv temp_openssl/* ${node_exporter_default_etc_directory}/
-                    rm -r temp_openssl
-                    echo "Moving cert files from temp folder to ${node_exporter_default_etc_directory}"
-                fi
-                is_crt_key_exist_in_node_exporter_folder
-                ask_for_usernam_passwor_promt
-                config_content="tls_server_config:
+            echo "Copying cert files from temp folder to ${node_exporter_default_etc_directory} ..."
+
+            copy_cert_files_from_temp_to_node_exporter
+
+            echo "*** Copied cert files from temp folder to ${node_exporter_default_etc_directory} ***"
+
+            is_crt_key_exist_in_node_exporter_folder
+
+            ask_for_usernam_passwor_promt
+
+            config_content="tls_server_config:
   cert_file: node_exporter.crt
   key_file: node_exporter.key
 basic_auth_users:
   $username: $password"
 
-            else
-                # Handle the case when selected_cert_option is not set (null or empty)
-                echo "selected_cert_option is not set."
-            fi
         fi
 
-        # relaoad daemon and enable systemctl
+        echo "Writing config file......"
+
+        write_config_yml
+
+        echo "*** Config file write done ***"
+
+        echo "creating systemd file ... "
+        #create systemd
+        create_systemd_service_file
+
+        echo "*** created systemd file"
+
         echo "creating a systemd user and giving persmission ............"
 
         create_system_user_and_give_permissions
