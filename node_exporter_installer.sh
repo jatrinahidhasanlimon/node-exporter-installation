@@ -6,36 +6,50 @@ readonly available_versions=("1.3.1" "1.6.1")
 readonly system_architecture=$(dpkg --print-architecture)
 readonly node_exporter_default_etc_directory="/etc/node_exporter"
 readonly config_file_path="${node_exporter_default_etc_directory}/config.yml"
-readonly bin_file_path="/usr/local/bin/node_exporter*"
+readonly bin_directory="/usr/local/bin"
+readonly bin_file_path="${bin_directory}/node_exporter*"
 
-# check is port is occpied
-is_port_occupied() {
-    # Get the port number from the user
-    port=$1
-    # Use the lsof command to check if the port is in use
-    lsof -i :"$port"
-    # If the port is in use, return 0
-    if [[ $? -eq 0 ]]; then
-        return 0
+# Function to check if a port is in use
+is_port_in_use() {
+    local port="$1"
+    ss -tuln | grep -q ":$port\b"
+    return $?
+}
+
+# Function to validate the port
+validate_port() {
+    local port="$1"
+
+    # Check if the port has any leading zeros
+    if [[ "$port" =~ ^0[0-9]+$ ]]; then
+        echo "Invalid port number. Port numbers cannot have leading zeros."
+        return 2 # Exit with a custom code (not 0 or 1) when validation fails
     fi
-    # If the port is not in use, return 1
-    return 1
+
+    if [[ ! "$port" =~ ^[0-9]+$ || "$port" -lt 1 || "$port" -gt 65535 ]]; then
+        echo "Invalid port number. Please enter a valid port (1-65535)."
+        return 2 # Exit with a custom code (not 0 or 1) when validation fails
+    fi
+
+    is_port_in_use "$port"
+    if [ $? -eq 0 ]; then
+        echo "Port $port is already in use. Please choose a different port."
+        return 2 # Exit with a custom code (not 0 or 1) when validation fails
+    fi
+
+    return 0
 }
 
 #take port from user unitll its got right
 port_input_from_user_prompt() {
-    # Get the port number from the user
-    echo "Enter the port number: "
-    read port
-
-    # Check if the port is occupied
-    while is_port_occupied $port; do
-        echo "Port $port is occupied. Please enter a different port: "
-        read port
+    # Ask the user for a valid and free port
+    while true; do
+        read -p "Enter a port number: " port
+        validate_port "$port"
+        if [ $? -eq 0 ]; then
+            break
+        fi
     done
-    # If the port is not in use, print "Port is not occupied"
-    echo "Port $port is not occupied"
-    return 1
 }
 
 is_already_installed() {
@@ -63,7 +77,6 @@ remove_allready_existing_files_and_folder() {
 
 download_and_extract_necessary_files_and_folders() {
     # Display the system's architecture
-    echo "\n System architecture: $system_architecture \n"
     download_link="https://github.com/prometheus/node_exporter/releases/download/v$selected_version/node_exporter-$selected_version.linux-$system_architecture.tar.gz"
     echo 'download link is: '$download_link
     #download from the github repository
@@ -93,7 +106,7 @@ move_extracted_files_and_folders() {
         echo "File '$bin_file_path' has been removed."
     fi
 
-    mv $downloaded_directory/node_exporter* /usr/local/bin
+    mv $downloaded_directory/node_exporter* $bin_directory
     mv $downloaded_directory/* ${node_exporter_default_etc_directory}
 }
 
@@ -275,7 +288,7 @@ is_crt_key_exist_in_node_exporter_folder() {
 }
 
 run_all_daemon_systemctl_command() {
- 
+
     systemctl daemon-reload
     systemctl enable node_exporter
     systemctl start node_exporter
@@ -283,8 +296,6 @@ run_all_daemon_systemctl_command() {
 }
 
 install_new() {
-
-    ##test
 
     port_input_from_user_prompt
 
@@ -298,7 +309,7 @@ install_new() {
 
     echo "Removing unnecessary downloaded files and folder ..."
     remove_downloaded_files_and_folders
-    echo "Removing downloaded files and folder ..."
+    echo "*** Removed downloaded files and folder***"
 
     user_installation_option_prompt
 
@@ -332,21 +343,21 @@ install_new() {
 
         # relaoad daemon and enable systemctl
         echo "creating a systemd user and giving persmission ............"
-        
-            create_system_user_and_give_permissions
-        
+
+        create_system_user_and_give_permissions
+
         echo "*** End of creating a systemd user and giving persmission ***"
 
         echo "*** All daemon process reloading ***"
-        
-            run_all_daemon_systemctl_command
-        
+
+        run_all_daemon_systemctl_command
+
         echo "***all daemon process reloaded***"
     fi
 }
 
 # starting main block
-
+echo "\n Your  System architecture: $system_architecture \n"
 # Prompt the user to select a version
 echo "Select a version:"
 for i in "${!available_versions[@]}"; do
@@ -369,7 +380,7 @@ if [[ "$selected_version_index" =~ ^[0-9]+$ && "$selected_version_index" -ge 1 &
         echo "Node Exporter is already installed. Do you want to remove the existing files and reinstall? (y/n)"
         read is_reinstall_answer
         # If the user is_reinstall_answers yes, remove the existing files and reinstall
-        if [[ $is_reinstall_answer == "y" || $is_reinstall_answer == "yes" ]]; then
+        if [[ "${is_reinstall_answer,,}" == "y" || "${is_reinstall_answer,,}" == "yes" ]]; then
 
             echo "Removing existing files..."
             remove_allready_existing_files_and_folder
@@ -382,8 +393,9 @@ if [[ "$selected_version_index" =~ ^[0-9]+$ && "$selected_version_index" -ge 1 &
     fi
     # end of Check if Node Exporter is already installed
 
-    echo " Installing started"
+    echo "Installation starting ......"
     install_new
+    echo "***Installing complete***"
 
 else
     echo "Invalid input. Please select a valid version."
