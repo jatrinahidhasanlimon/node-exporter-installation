@@ -1,5 +1,9 @@
 #!/bin/bash
-# set -e
+# ANSI color codes for text color
+readonly green='\e[32m'
+readonly red='\e[31m'
+readonly reset='\e[0m'
+
 readonly system_architecture=$(dpkg --print-architecture)
 readonly available_versions=("1.3.1" "1.6.1")
 readonly node_exporter_default_etc_directory="/etc/node_exporter"
@@ -7,16 +11,10 @@ readonly config_file_path="${node_exporter_default_etc_directory}/config.yml"
 readonly bin_directory="/usr/local/bin"
 readonly node_exporter_bin_file_path="${bin_directory}/node_exporter*"
 readonly node_exporter_service_file_path="/etc/systemd/system/node_exporter.service"
-readonly username="node_exporter"
+readonly system_username="node_exporter"
 readonly selected_version="1.6.1"
-# ANSI color codes for text color
-readonly green='\e[32m'
-readonly red='\e[31m'
-readonly reset='\e[0m'
 
 config_content=""
-
-
 
 # Function to check if a port is in use
 is_port_in_use() {
@@ -111,16 +109,15 @@ move_extracted_files_and_folders() {
 }
 
 create_system_user_and_give_permissions() {
-    # Check if the user already exists
-    if ! id "$username" &>/dev/null; then
-        useradd -rs /bin/false $username
-        sudo chown -R $username:$username ${node_exporter_default_etc_directory}
+    # Check if the user already exists if not create user
+    if ! id "$system_username" &>/dev/null; then
+        useradd -rs /bin/false $system_username
     fi
+     sudo chown -R $system_username:$system_username ${node_exporter_default_etc_directory}
 
 }
 
 remove_downloaded_files_and_folders() {
-    #created folder is a combinationof selected version of node_exporter and system_architecture
     if [ -d "$downloaded_directory" ]; then
         rm -r $downloaded_directory*
     fi
@@ -238,17 +235,17 @@ run_all_daemon_systemctl_command() {
     systemctl status node_exporter
 }
 
-install_new() {
+install_from_scratch() {
 
     echo "Downloading files..."
     download_and_extract_necessary_files_and_folders
-    echo "End of downloading files and extract..."
+    echo "Files downloaded and extracted..."
 
     echo "Moving extracted files..."
     move_extracted_files_and_folders
     echo "End of moving extracted files..."
 
-    echo "Removing unnecessary downloaded files and folder ..."
+    echo "Removing downloaded files and folder ..."
     remove_downloaded_files_and_folders
     echo "Removed downloaded files and folder..."
 
@@ -304,8 +301,8 @@ welcome_prompt() {
     echo -e "${green}#        Welcome to Node Exporter Installer        #${reset}"
     echo -e "${green}###############################################${reset}"
     echo
-    echo -e "Node Exporter version ${selected_version}"
-    echo -e "Your System architecture: $system_architecture"
+    echo -e "Node Exporter Installable Version: ${selected_version}"
+    echo -e "Your System Architecture: $system_architecture"
     echo -e "\n"
 
 
@@ -315,7 +312,7 @@ welcome_prompt() {
 
 welcome_prompt
 
-echo "is node exporter already installed checking......"
+echo "is node exporter already installed in your system checking......"
 # Start Check if Node Exporter is already installed
 node_exporter_status=$(systemctl is-active node_exporter.service)
 # Return true if the service is active
@@ -338,13 +335,13 @@ if [[ $node_exporter_status == "active" ]]; then
         exit
     fi
 else
- echo -e "${green}Couldn't found any node_exporter in your machine! Node exporter ${selected_version} installation started... \n ${reset}"
+ echo -e "${green}Couldn't found any node_exporter service in your machine! node exporter ${selected_version} installation continuing... \n ${reset}"
 fi
 
 mkdir -p "$node_exporter_default_etc_directory"
 
 port_input_from_user_prompt
 
-echo "Installation starting ......"
-install_new
-echo "***Installing complete***"
+echo -e "${green}Installation starting ${reset}"
+install_from_scratch
+echo -e "${green}Installation Complete ${reset}"
