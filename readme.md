@@ -1,6 +1,8 @@
-### Crafted a Bash script for effortlessly installing Node Exporter, simplifying the process. Just run ````` sudo ./node_exporter_installer.sh````` 
+### Crafted a Bash script for effortlessly installing Node Exporter, simplifying the process. Just run `````sudo ./node_exporter_installer.sh````` 
 and boom! 
-Here are the steps that are going to help you installl node exporter efficiently with basic auth! Listed all the steps those are not meant to be run manually.. 
+
+
+##### Here are the steps that are needed to follow to install node exporter efficiently with basic auth! but with this bash following commands should not be run manually.
 
 ** In the following text all **arm64** will be replaced by amd64 if your system architecture is **amd64** . you can find your system architecture by running   `````jdpkg --print-architecture`````
 
