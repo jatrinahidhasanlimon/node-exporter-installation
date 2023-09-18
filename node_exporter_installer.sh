@@ -1,13 +1,19 @@
 #!/bin/bash
-# set -e
-# Fetch the system's architecture and save it to a variable
-# List of available version numbers
-readonly available_versions=("1.3.1" "1.6.1")
+# ANSI color codes for text color
+readonly green='\e[32m'
+readonly red='\e[31m'
+readonly reset='\e[0m'
+
 readonly system_architecture=$(dpkg --print-architecture)
+readonly available_versions=("1.3.1" "1.6.1")
 readonly node_exporter_default_etc_directory="/etc/node_exporter"
 readonly config_file_path="${node_exporter_default_etc_directory}/config.yml"
 readonly bin_directory="/usr/local/bin"
-readonly bin_file_path="${bin_directory}/node_exporter*"
+readonly node_exporter_bin_file_path="${bin_directory}/node_exporter*"
+readonly node_exporter_service_file_path="/etc/systemd/system/node_exporter.service"
+readonly system_username="node_exporter"
+readonly selected_version="1.6.1"
+
 config_content=""
 
 # Function to check if a port is in use
@@ -53,27 +59,35 @@ port_input_from_user_prompt() {
     done
 }
 
-is_already_installed() {
-    # Get the status of the Apache2 service
-    status=$(systemctl is-active node_exporter.service)
-
-    # Return true if the service is active
-    if [[ $status == "active" ]]; then
-        return 0
-    else
-        return 1 ##need to change
+remove_previous_installation_files_and_folder() {
+    # Check if the directory exists
+    if [ -d "$node_exporter_default_etc_directory" ]; then
+        echo "Directory exists. Removing..."
+        rm -r "$node_exporter_default_etc_directory"
     fi
-}
 
-remove_allready_existing_files_and_folder() {
-    # Remove the node_exporter configuration directory
-    rm -r ${node_exporter_default_etc_directory}
-    # Remove all files and directories named node_exporter
-    rm -r node_exporter-$selected_version*
-    # Stop the node_exporter service
+    if [ -e "$node_exporter_bin_file_path" ]; then
+        rm "$node_exporter_bin_file_path"
+        echo "File '$node_exporter_bin_file_path' has been removed."
+    fi
+
+    if [ -e "node_exporter-$selected_version*" ]; then
+        rm -r node_exporter-$selected_version*
+        echo "File 'node_exporter-$selected_version*' has been removed."
+    fi
+
     systemctl stop node_exporter
+
+    if [ -e "$node_exporter_service_file_path" ]; then
+        rm "$node_exporter_service_file_path"
+        echo "File '$node_exporter_service_file_path' has been removed."
+    fi
+    # Create the directory
+    mkdir -p "$node_exporter_default_etc_directory"
+
+    echo "Directory created at $node_exporter_default_etc_directory"
+
     # Remove the node_exporter systemd unit file
-    rm -r /etc/systemd/system/node_exporter.service
 }
 
 download_and_extract_necessary_files_and_folders() {
@@ -87,46 +101,33 @@ download_and_extract_necessary_files_and_folders() {
 }
 
 move_extracted_files_and_folders() {
-
-    # Check if the directory exists
-    if [ -d "$node_exporter_default_etc_directory" ]; then
-        echo "Directory exists. Removing..."
-        rm -r "$node_exporter_default_etc_directory"
-    fi
-
-    # Create the directory
-    mkdir -p "$node_exporter_default_etc_directory"
-
-    echo "Directory created at $node_exporter_default_etc_directory"
-
     #created folder is a combination of  selected version of node_exporter and system_architecture
     downloaded_directory=node_exporter-$selected_version.linux-$system_architecture
-
-    if [ -e "$bin_file_path" ]; then
-        rm "$bin_file_path"
-        echo "File '$bin_file_path' has been removed."
-    fi
 
     mv $downloaded_directory/node_exporter* $bin_directory
     mv $downloaded_directory/* ${node_exporter_default_etc_directory}
 }
 
 create_system_user_and_give_permissions() {
-    useradd -rs /bin/false node_exporter
-    sudo chown -R node_exporter:node_exporter ${node_exporter_default_etc_directory}
+    # Check if the user already exists if not create user
+    if ! id "$system_username" &>/dev/null; then
+        useradd -rs /bin/false $system_username
+    fi
+     sudo chown -R $system_username:$system_username ${node_exporter_default_etc_directory}
+
 }
 
 remove_downloaded_files_and_folders() {
-    #created folder is a combination of  selected version of node_exporter and system_architecture
-    rm -r $downloaded_directory*
+    if [ -d "$downloaded_directory" ]; then
+        rm -r $downloaded_directory*
+    fi
 }
 
 create_systemd_service_file() {
-    service_file_path="/etc/systemd/system/node_exporter.service"
 
-    if [ -e "$service_file_path" ]; then
-        rm "$service_file_path"
-        echo "File'$service_file_path' has been removed."
+    if [ -e "$node_exporter_service_file_path" ]; then
+        rm "$node_exporter_service_file_path"
+        echo "File'$node_exporter_service_file_path' has been removed."
     fi
 
     # Text to be written to the file
@@ -138,25 +139,23 @@ create_systemd_service_file() {
     User=node_exporter
     Group=node_exporter
     Type=simple
-    ExecStart=/usr/local/bin/node_exporter --web.config.file=${node_exporter_default_etc_directory}/config.yml --web.listen-address=:$port
+    ExecStart=/usr/local/bin/node_exporter --web.config.file=${config_file_path} --web.listen-address=:$port
     [Install]
     WantedBy=multi-user.target"
 
     # Use redirection to create and write to the file
-    echo "$content_of_service_file" >"$service_file_path"
+    echo "$content_of_service_file" >"$node_exporter_service_file_path"
 
     # Check if the file was created successfully
-    if [ -e "$service_file_path" ]; then
-        echo "File '$service_file_path' created and text written successfully."
+    if [ -e "$node_exporter_service_file_path" ]; then
+        echo "File '$node_exporter_service_file_path' created and text written successfully."
     else
-        echo "Error creating the file or writing text to $service_file_path."
+        echo "Error creating the file or writing text to $node_exporter_service_file_path."
     fi
 
 }
-ask_for_usernam_passwor_promt() {
 
-    #!/bin/bash
-
+ask_for_username_password_promt() {
     while true; do
         read -p "Enter a username: " username
 
@@ -196,8 +195,6 @@ write_config_yml() {
         echo "File'$config_file_path' has been removed."
     fi
 
-    # Text to be written to the file
-    
     # Use redirection to create and write to the file
     echo "$config_content" >"$config_file_path"
 
@@ -212,7 +209,7 @@ write_config_yml() {
 
 user_installation_option_prompt() {
     PS3="Select an option: "
-    installation_options=("Basic Installation" "Secured Installation" "Quit")
+    installation_options=("Basic Installation" "Secured Installation")
 
     select selected_user_installation_option in "${installation_options[@]}"; do
         case $selected_user_installation_option in
@@ -222,125 +219,68 @@ user_installation_option_prompt() {
             ;;
         "Secured Installation")
             echo "Thank you for choosing Secured Installation."
-            cert_certificate_options_prompt
             break
-            ;;
-        "Quit")
-            echo "Exiting..."
-            exit 0
             ;;
         *)
             echo "Invalid choice. Please select a valid option."
             ;;
         esac
     done
-}
-
-cert_certificate_options_prompt() {
-    PS4="Do you want to: "
-    cert_installation_options=("Create a new certificate" "Use an existing certificate" "Quit")
-
-    select selected_cert_option in "${cert_installation_options[@]}"; do
-        case $selected_cert_option in
-        "Create a new certificate")
-            echo -e "\nYou chose to create a new certificate"
-            generate_cert_and_key
-            break
-            ;;
-        "Use an existing certificate")
-            echo -e "\nYou chose to use an existing certificate"
-            break
-            ;;
-        "Quit")
-            echo "Exiting..."
-            exit
-            ;;
-        *)
-            echo "Invalid choice. Please select a valid option."
-            ;;
-        esac
-    done
-}
-
-generate_cert_and_key() {
-    mkdir temp_openssl
-    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -keyout temp_openssl/node_exporter.key -out temp_openssl/node_exporter.crt
-}
-
-is_crt_key_exist_in_node_exporter_folder() {
-    directory="${node_exporter_default_etc_directory}" # Replace with the actual directory path
-    cert_file="$directory/node_exporter.crt"
-    key_file="$directory/node_exporter.key"
-
-    if [ -e "$cert_file" ] && [ -e "$key_file" ]; then
-        echo "Both files $cert_file and $key_file exist in the directory $directory."
-    elif [ -e "$cert_file" ]; then
-        echo "File $key_file does not exist in the directory $directory."
-    elif [ -e "$key_file" ]; then
-        echo "File $cert_file does not exist in the directory $directory."
-    else
-        echo "Exiting ..... Neither file $cert_file nor $key_file exists in the directory $directory."
-        exit
-    fi
 }
 
 run_all_daemon_systemctl_command() {
-
     systemctl daemon-reload
     systemctl enable node_exporter
     systemctl start node_exporter
     systemctl status node_exporter
 }
 
-install_new() {
+install_from_scratch() {
 
     echo "Downloading files..."
     download_and_extract_necessary_files_and_folders
-    echo "End of downloading files and extract..."
+    echo "Files downloaded and extracted..."
 
     echo "Moving extracted files..."
     move_extracted_files_and_folders
     echo "End of moving extracted files..."
 
-    echo "Removing unnecessary downloaded files and folder ..."
+    echo "Removing downloaded files and folder ..."
     remove_downloaded_files_and_folders
-    echo "*** Removed downloaded files and folder***"
+    echo "Removed downloaded files and folder..."
 
     user_installation_option_prompt
 
     if [ -n "$selected_user_installation_option" ]; then
-        create_systemd_service_file
 
         if [ "$selected_user_installation_option" == "Basic Installation" ]; then
             echo "*** continue as Basic installation  *** "
         fi
 
         if [ "$selected_user_installation_option" == "Secured Installation" ]; then
+            echo "*** continue as Secured installation  *** "
+            # Text to be written to the file
 
-            # Check if selected_cert_option is set (not null or empty)
-            if [ -n "$selected_cert_option" ]; then
-                # Nested check: if the variable value is equal to "Use an existing certificate"
-                if [ "$selected_cert_option" == "Create a new certificate" ]; then
-                    # Perform actions when selected_cert_option is set and is "Use an existing certificate"
-                    mv temp_openssl/* ${node_exporter_default_etc_directory}/
-                    rm -r temp_openssl
-                    echo "Moving cert files from temp folder to ${node_exporter_default_etc_directory}"
-                fi
-                is_crt_key_exist_in_node_exporter_folder
-                ask_for_usernam_passwor_promt
-                config_content="tls_server_config:
-  cert_file: node_exporter.crt
-  key_file: node_exporter.key
+            ask_for_username_password_promt
+
+            config_content="
 basic_auth_users:
   $username: $password"
 
-            else
-                # Handle the case when selected_cert_option is not set (null or empty)
-                echo "selected_cert_option is not set."
-            fi
         fi
 
-        # relaoad daemon and enable systemctl
+        echo "Writing config file......"
+
+        write_config_yml
+
+        echo "*** Config file write done ***"
+
+        echo "creating systemd file ... "
+        #create systemd
+        create_systemd_service_file
+
+        echo "*** created systemd file"
+
         echo "creating a systemd user and giving persmission ............"
 
         create_system_user_and_give_permissions
@@ -355,50 +295,53 @@ basic_auth_users:
     fi
 }
 
+welcome_prompt() {
+    # Print a colorful welcome message
+    echo -e "${green}###############################################${reset}"
+    echo -e "${green}#        Welcome to Node Exporter Installer        #${reset}"
+    echo -e "${green}###############################################${reset}"
+    echo
+    echo -e "Node Exporter Installable Version: ${selected_version}"
+    echo -e "Your System Architecture: $system_architecture"
+    echo -e "\n"
+
+
+}
+
 # starting main block
-echo "\n Your  System architecture: $system_architecture \n"
-# Prompt the user to select a version
-echo "Select a version:"
-for i in "${!available_versions[@]}"; do
-    echo "$((i + 1)) -  ${available_versions[i]}"
-done
 
-read -p "Enter the number of the version you want to use: " selected_version_index
+welcome_prompt
 
-#Check if the user input is a valid index
+echo "is node exporter already installed in your system checking......"
+# Start Check if Node Exporter is already installed
+node_exporter_status=$(systemctl is-active node_exporter.service)
+# Return true if the service is active
+if [[ $node_exporter_status == "active" ]]; then
 
-if [[ "$selected_version_index" =~ ^[0-9]+$ && "$selected_version_index" -ge 1 && "$selected_version_index" -le "${#available_versions[@]}" ]]; then
-    selected_version="${available_versions[selected_version_index - 1]}"
-    # Take Input Port from user
+    # Ask the user if they want to remove the existing files and reinstall
+    echo -e "${red}Node Exporter is already installed. Do you want to remove the existing files and reinstall? (y/n) ${reset}"
+    read is_reinstall_answer
+    # If the user is_reinstall_answers yes, remove the existing files and reinstall
+    if [[ "${is_reinstall_answer,,}" == "y" || "${is_reinstall_answer,,}" == "yes" ]]; then
 
-    echo "***is node exporter already installed checking......**"
+        echo "Removing existing files..."
 
-    # Start Check if Node Exporter is already installed
-    if is_already_installed; then
-        # Ask the user if they want to remove the existing files and reinstall
-        echo "Node Exporter is already installed. Do you want to remove the existing files and reinstall? (y/n)"
-        read is_reinstall_answer
-        # If the user is_reinstall_answers yes, remove the existing files and reinstall
-        if [[ "${is_reinstall_answer,,}" == "y" || "${is_reinstall_answer,,}" == "yes" ]]; then
+        remove_previous_installation_files_and_folder
 
-            echo "Removing existing files..."
-            remove_allready_existing_files_and_folder
-            echo "End of Removing existing files..."
+        echo "End of Removing existing files..."
 
-        else
-            echo "Exiting...."
-            exit
-        fi
+    else
+        echo "Exiting...."
+        exit
     fi
-    # end of Check if Node Exporter is already installed
-
-    port_input_from_user_prompt
-
-    echo "Installation starting ......"
-    install_new
-    echo "***Installing complete***"
-
 else
-    echo "Invalid input. Please select a valid version."
-    exit 1
+ echo -e "${green}Couldn't found any node_exporter service in your machine! node exporter ${selected_version} installation continuing... \n ${reset}"
 fi
+
+mkdir -p "$node_exporter_default_etc_directory"
+
+port_input_from_user_prompt
+
+echo -e "${green}Installation starting ${reset}"
+install_from_scratch
+echo -e "${green}Installation Complete ${reset}"
